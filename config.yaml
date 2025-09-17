@@ -1,0 +1,137 @@
+# Configuration for Financial Statement Attribute Extraction
+
+# AWS Configuration
+aws:
+  region: "us-east-1"
+  bedrock_model: "anthropic.claude-3-sonnet-20240229-v1:0"
+  s3_input_bucket: "${S3_INPUT_BUCKET}"
+  s3_output_bucket: "${S3_OUTPUT_BUCKET}"
+
+# PDF Processing Configuration
+pdf_processing:
+  max_file_size_mb: 100
+  ocr_enabled: true
+  text_extraction_timeout: 300
+  chunk_size: 1024
+
+# Financial Attributes to Extract
+attributes:
+  - name: "Total Revenue"
+    description: "The total revenue or sales reported in the financial statement for the period"
+    data_type: "currency"
+    required: true
+    
+  - name: "Net Income"
+    description: "The net income or profit after all expenses and taxes for the period"
+    data_type: "currency"
+    required: true
+    
+  - name: "Total Assets"
+    description: "The total assets reported on the balance sheet"
+    data_type: "currency"
+    required: true
+    
+  - name: "Total Liabilities"
+    description: "The total liabilities reported on the balance sheet"
+    data_type: "currency"
+    required: true
+    
+  - name: "Shareholders Equity"
+    description: "The total shareholders' equity or stockholders' equity"
+    data_type: "currency"
+    required: true
+    
+  - name: "Operating Cash Flow"
+    description: "Cash flow from operating activities"
+    data_type: "currency"
+    required: false
+    
+  - name: "Gross Profit"
+    description: "Gross profit calculated as revenue minus cost of goods sold"
+    data_type: "currency"
+    required: false
+    
+  - name: "EBITDA"
+    description: "Earnings before interest, taxes, depreciation, and amortization"
+    data_type: "currency"
+    required: false
+    
+  - name: "Current Assets"
+    description: "Total current assets that can be converted to cash within one year"
+    data_type: "currency"
+    required: false
+    
+  - name: "Current Liabilities"
+    description: "Total current liabilities due within one year"
+    data_type: "currency"
+    required: false
+    
+  - name: "Long-term Debt"
+    description: "Long-term debt or borrowings due after one year"
+    data_type: "currency"
+    required: false
+    
+  - name: "Report Period"
+    description: "The reporting period (e.g., Q1 2023, FY 2023, March 2023)"
+    data_type: "text"
+    required: true
+    
+  - name: "Report Year"
+    description: "The year of the financial report (e.g., 2023)"
+    data_type: "number"
+    required: true
+    
+  - name: "Report Quarter"
+    description: "The quarter if applicable (Q1, Q2, Q3, Q4) or leave empty for annual reports"
+    data_type: "text"
+    required: false
+    
+  - name: "Company Name"
+    description: "The name of the company or organization"
+    data_type: "text"
+    required: true
+
+# Excel Report Configuration
+excel_report:
+  sheets:
+    - name: "Summary Dashboard"
+      description: "Overview statistics and key metrics"
+    - name: "Consolidated Data"
+      description: "All extracted data in tabular format"
+    - name: "Year-over-Year Analysis"
+      description: "Comparative analysis across years"
+    - name: "Monthly Breakdown"
+      description: "Monthly data breakdown"
+    - name: "Individual PDF Details"
+      description: "Detailed results per PDF"
+    - name: "Data Quality Report"
+      description: "Extraction confidence and quality metrics"
+  
+  formatting:
+    header_color: "#4472C4"
+    data_color: "#F2F2F2"
+    highlight_color: "#FFE699"
+    font_name: "Calibri"
+    font_size: 11
+
+# Chatbot Configuration
+chatbot:
+  system_prompt: |
+    You are a financial analysis assistant. You have access to extracted financial data from multiple PDF documents.
+    Help users understand and analyze the financial information by:
+    1. Answering questions about specific financial metrics
+    2. Providing insights on trends and patterns
+    3. Explaining financial ratios and their implications
+    4. Comparing data across different periods
+    5. Identifying potential areas of concern or opportunity
+    
+    Always base your responses on the provided data and be clear about any limitations or assumptions.
+  
+  max_tokens: 1000
+  temperature: 0.3
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "app.log"
