@@ -1,12 +1,18 @@
 import streamlit as st
 import os
 import logging
+from dotenv import load_dotenv
+import yaml
+from typing import List
+
+# Load environment variables first
+load_dotenv()
+
+# Import modules after loading environment
 from pdf_processor import PDFProcessor
 from bedrock_client import BedrockClient
 from output_handler import OutputHandler
 from bot_interface import BotInterface
-import yaml
-from typing import List
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -19,11 +25,33 @@ def load_config():
 
 config = load_config()
 
+# Initialize clients with proper error handling
+@st.cache_resource
+def initialize_clients():
+    try:
+        # Check if required environment variables are set
+        required_vars = ['AWS_REGION', 'S3_INPUT_BUCKET', 'S3_OUTPUT_BUCKET']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        
+        if missing_vars:
+            st.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+            st.info("Please set the following environment variables in your .env file:")
+            for var in missing_vars:
+                st.code(f"{var}=your_value_here")
+            return None, None, None, None
+        
+        pdf_processor = PDFProcessor()
+        bedrock_client = BedrockClient()
+        output_handler = OutputHandler()
+        bot_interface = BotInterface(bedrock_client=bedrock_client)
+        
+        return pdf_processor, bedrock_client, output_handler, bot_interface
+    except Exception as e:
+        st.error(f"Error initializing clients: {str(e)}")
+        return None, None, None, None
+
 # Initialize clients
-pdf_processor = PDFProcessor()
-bedrock_client = BedrockClient()
-output_handler = OutputHandler()
-bot_interface = BotInterface(bedrock_client=bedrock_client)
+pdf_processor, bedrock_client, output_handler, bot_interface = initialize_clients()
 
 st.set_page_config(page_title="Financial PDF Extractor & Bot", layout="wide")
 
@@ -32,6 +60,10 @@ st.title("Financial Statement Extraction & Analysis")
 st.markdown("""
 This app allows you to select financial statement PDFs from an AWS S3 bucket, extract key financial attributes using AWS Bedrock Claude, and analyze the data with an interactive chatbot.
 """)
+
+# Check if clients are initialized
+if not all([pdf_processor, bedrock_client, output_handler, bot_interface]):
+    st.stop()
 
 # Sidebar for S3 PDF selection
 st.sidebar.header("Select PDFs from S3 Input Bucket")
@@ -55,6 +87,7 @@ try:
     
 except Exception as e:
     st.sidebar.error(f"Error accessing S3 bucket: {str(e)}")
+    st.sidebar.info("Please check your AWS credentials and S3 bucket configuration.")
     st.stop()
 
 # Extract button
@@ -163,3 +196,19 @@ if user_question:
     with st.spinner("Generating response..."):
         response = bot_interface.handle_user_input(user_question)
         st.markdown(f"**Bot:** {response.get('response', 'No response generated.')}")
+
+# Environment status in sidebar
+with st.sidebar:
+    st.divider()
+    st.subheader("Environment Status")
+    
+    env_status = {
+        "AWS Region": os.getenv('AWS_REGION', '❌ Not Set'),
+        "AWS Access Key": "✅ Set" if os.getenv('AWS_ACCESS_KEY_ID') else "❌ Not Set",
+        "AWS Secret Key": "✅ Set" if os.getenv('AWS_SECRET_ACCESS_KEY') else "❌ Not Set",
+        "Input Bucket": os.getenv('S3_INPUT_BUCKET', '❌ Not Set'),
+        "Output Bucket": os.getenv('S3_OUTPUT_BUCKET', '❌ Not Set')
+    }
+    
+    for key, value in env_status.items():
+        st.write(f"**{key}:** {value}")
