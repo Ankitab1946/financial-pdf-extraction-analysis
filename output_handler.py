@@ -14,21 +14,27 @@ class OutputHandler:
     """Handle saving outputs to S3 and generating download links"""
     
     def __init__(self, region_name: str = None):
+        from env_config import get_s3_config, get_aws_session
+        
         self.region_name = region_name or os.getenv('AWS_REGION', 'us-east-1')
-        self.output_bucket = os.getenv('S3_OUTPUT_BUCKET')
+        self.s3_config = get_s3_config()
+        
+        # Determine output bucket and folder
+        if self.s3_config['use_single_bucket']:
+            self.output_bucket = self.s3_config['bucket_name']
+            self.output_folder = self.s3_config['output_folder']
+        else:
+            self.output_bucket = self.s3_config['output_bucket']
+            self.output_folder = ""
         
         if not self.output_bucket:
-            raise ValueError("S3_OUTPUT_BUCKET environment variable is required")
+            raise ValueError("No S3 output bucket configured")
         
         try:
-            self.s3_client = boto3.client(
-                's3',
-                region_name=self.region_name,
-                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-                aws_session_token=os.getenv('AWS_SESSION_TOKEN')
-            )
+            session = get_aws_session()
+            self.s3_client = session.client('s3')
             logger.info(f"S3 client initialized for output bucket: {self.output_bucket}")
+            logger.info(f"Output folder: {self.output_folder}")
         except Exception as e:
             logger.error(f"Failed to initialize S3 client: {str(e)}")
             raise
@@ -51,7 +57,12 @@ class OutputHandler:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             base_name = os.path.splitext(pdf_filename)[0]
             json_filename = f"{base_name}_{timestamp}.json"
-            s3_key = f"Output/individual_jsons/{json_filename}"
+            
+            # Construct S3 key based on configuration
+            if self.output_folder:
+                s3_key = f"{self.output_folder}/individual_jsons/{json_filename}"
+            else:
+                s3_key = f"Output/individual_jsons/{json_filename}"
             
             # Prepare JSON data with metadata
             json_output = {
@@ -111,7 +122,12 @@ class OutputHandler:
             # Generate Excel filename
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             excel_filename = f"consolidated_financial_report_{timestamp}.xlsx"
-            s3_key = f"Output/consolidated_reports/{excel_filename}"
+            
+            # Construct S3 key based on configuration
+            if self.output_folder:
+                s3_key = f"{self.output_folder}/consolidated_reports/{excel_filename}"
+            else:
+                s3_key = f"Output/consolidated_reports/{excel_filename}"
             
             # Generate Excel report
             excel_bytes = self.excel_generator.generate_consolidated_excel_report(all_pdf_data)
@@ -158,6 +174,11 @@ class OutputHandler:
                     "successful_extractions": 0,
                     "failed_extractions": 0,
                     "average_confidence": 0.0
+                },
+                "s3_config": {
+                    "bucket": self.output_bucket,
+                    "folder": self.output_folder,
+                    "use_single_bucket": self.s3_config['use_single_bucket']
                 }
             }
             
@@ -303,11 +324,19 @@ class OutputHandler:
                 "consolidated_reports": []
             }
             
+            # Determine prefixes based on configuration
+            if self.output_folder:
+                json_prefix = f"{self.output_folder}/individual_jsons/"
+                excel_prefix = f"{self.output_folder}/consolidated_reports/"
+            else:
+                json_prefix = "Output/individual_jsons/"
+                excel_prefix = "Output/consolidated_reports/"
+            
             # List individual JSON files
             try:
                 response = self.s3_client.list_objects_v2(
                     Bucket=self.output_bucket,
-                    Prefix="Output/individual_jsons/"
+                    Prefix=json_prefix
                 )
                 
                 if 'Contents' in response:
@@ -327,7 +356,7 @@ class OutputHandler:
             try:
                 response = self.s3_client.list_objects_v2(
                     Bucket=self.output_bucket,
-                    Prefix="Output/consolidated_reports/"
+                    Prefix=excel_prefix
                 )
                 
                 if 'Contents' in response:
@@ -373,10 +402,16 @@ class OutputHandler:
                 "errors": 0
             }
             
+            # Determine prefix based on configuration
+            if self.output_folder:
+                prefix = f"{self.output_folder}/"
+            else:
+                prefix = "Output/"
+            
             # List all output files
             response = self.s3_client.list_objects_v2(
                 Bucket=self.output_bucket,
-                Prefix="Output/"
+                Prefix=prefix
             )
             
             if 'Contents' in response:
