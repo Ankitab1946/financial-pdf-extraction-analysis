@@ -1,0 +1,4 @@
+{
+  "tests/test_pdf_processor.py::TestPDFProcessor::test_extract_text_with_pdfplumber_success": true,
+  "tests/test_pdf_processor.py::TestPDFProcessor::test_extract_text_fallback_to_pymupdf": true
+}
