@@ -13,6 +13,7 @@ from pdf_processor import PDFProcessor
 from bedrock_client import BedrockClient
 from output_handler import OutputHandler
 from bot_interface import BotInterface
+from env_config import get_s3_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,15 +30,43 @@ config = load_config()
 @st.cache_resource
 def initialize_clients():
     try:
-        # Check if required environment variables are set
-        required_vars = ['AWS_REGION', 'S3_INPUT_BUCKET', 'S3_OUTPUT_BUCKET']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        # Check S3 configuration
+        s3_config = get_s3_config()
+        
+        if s3_config['use_single_bucket']:
+            required_vars = ['S3_BUCKET_NAME', 'AWS_REGION']
+            missing_vars = []
+            if not os.getenv('S3_BUCKET_NAME'):
+                missing_vars.append('S3_BUCKET_NAME')
+        else:
+            required_vars = ['S3_INPUT_BUCKET', 'S3_OUTPUT_BUCKET', 'AWS_REGION']
+            missing_vars = []
+            if not os.getenv('S3_INPUT_BUCKET'):
+                missing_vars.append('S3_INPUT_BUCKET')
+            if not os.getenv('S3_OUTPUT_BUCKET'):
+                missing_vars.append('S3_OUTPUT_BUCKET')
+        
+        if not os.getenv('AWS_REGION'):
+            missing_vars.append('AWS_REGION')
         
         if missing_vars:
             st.error(f"Missing required environment variables: {', '.join(missing_vars)}")
             st.info("Please set the following environment variables in your .env file:")
+            
+            if s3_config['use_single_bucket'] or not any([os.getenv('S3_INPUT_BUCKET'), os.getenv('S3_OUTPUT_BUCKET')]):
+                st.code("# Single bucket with folders configuration")
+                st.code("S3_BUCKET_NAME=your-bucket-name")
+                st.code("S3_INPUT_FOLDER=inputfolder")
+                st.code("S3_OUTPUT_FOLDER=outputfolder")
+            else:
+                st.code("# Separate buckets configuration")
+                st.code("S3_INPUT_BUCKET=your-input-bucket")
+                st.code("S3_OUTPUT_BUCKET=your-output-bucket")
+            
             for var in missing_vars:
-                st.code(f"{var}=your_value_here")
+                if var not in ['S3_INPUT_BUCKET', 'S3_OUTPUT_BUCKET', 'S3_BUCKET_NAME']:
+                    st.code(f"{var}=your_value_here")
+            
             return None, None, None, None
         
         pdf_processor = PDFProcessor()
@@ -59,6 +88,10 @@ st.title("Financial Statement Extraction & Analysis")
 
 st.markdown("""
 This app allows you to select financial statement PDFs from an AWS S3 bucket, extract key financial attributes using AWS Bedrock Claude, and analyze the data with an interactive chatbot.
+
+**S3 Configuration Support:**
+- **Single Bucket Mode**: Use one bucket with separate folders for input and output
+- **Separate Buckets Mode**: Use different buckets for input and output (legacy)
 """)
 
 # Check if clients are initialized
@@ -66,28 +99,44 @@ if not all([pdf_processor, bedrock_client, output_handler, bot_interface]):
     st.stop()
 
 # Sidebar for S3 PDF selection
-st.sidebar.header("Select PDFs from S3 Input Bucket")
+st.sidebar.header("Select PDFs from S3")
 
 try:
-    s3_input_bucket = os.getenv("S3_INPUT_BUCKET")
-    if not s3_input_bucket:
-        st.sidebar.error("S3_INPUT_BUCKET environment variable not set.")
-        st.stop()
+    s3_config = get_s3_config()
     
-    pdf_files = pdf_processor.list_pdfs_from_s3(s3_input_bucket)
+    # Display S3 configuration
+    st.sidebar.subheader("📁 S3 Configuration")
+    if s3_config['use_single_bucket']:
+        st.sidebar.success(f"**Bucket:** {s3_config['bucket_name']}")
+        st.sidebar.info(f"**Input Folder:** {s3_config['input_folder']}")
+        st.sidebar.info(f"**Output Folder:** {s3_config['output_folder']}")
+    else:
+        st.sidebar.info(f"**Input Bucket:** {s3_config['input_bucket']}")
+        st.sidebar.info(f"**Output Bucket:** {s3_config['output_bucket']}")
+    
+    # List PDFs
+    pdf_files = pdf_processor.list_pdfs_from_s3()
     
     if not pdf_files:
-        st.sidebar.info("No PDF files found in the S3 input bucket.")
+        st.sidebar.warning("No PDF files found in the S3 input location.")
+        st.sidebar.info("Please upload PDF files to your configured input location.")
         st.stop()
     
+    st.sidebar.success(f"Found {len(pdf_files)} PDF files")
+    
     pdf_options = [f"{pdf['filename']} ({pdf['size_mb']} MB)" for pdf in pdf_files]
-    selected_indices = st.sidebar.multiselect("Select one or more PDFs to process", range(len(pdf_options)), format_func=lambda x: pdf_options[x])
+    selected_indices = st.sidebar.multiselect(
+        "Select one or more PDFs to process", 
+        range(len(pdf_options)), 
+        format_func=lambda x: pdf_options[x]
+    )
     
     selected_pdf_keys = [pdf_files[i]['key'] for i in selected_indices]
+    selected_bucket = pdf_files[0]['bucket'] if pdf_files else None
     
 except Exception as e:
-    st.sidebar.error(f"Error accessing S3 bucket: {str(e)}")
-    st.sidebar.info("Please check your AWS credentials and S3 bucket configuration.")
+    st.sidebar.error(f"Error accessing S3: {str(e)}")
+    st.sidebar.info("Please check your AWS credentials and S3 configuration.")
     st.stop()
 
 # Extract button
@@ -97,7 +146,7 @@ if st.sidebar.button("Extract Data from Selected PDFs"):
     else:
         with st.spinner("Processing PDFs and extracting data..."):
             # Process PDFs
-            pdf_results = pdf_processor.process_multiple_pdfs(s3_input_bucket, selected_pdf_keys)
+            pdf_results = pdf_processor.process_multiple_pdfs(selected_bucket, selected_pdf_keys)
             
             # Extract attributes using Bedrock
             extracted_results = []
@@ -128,6 +177,12 @@ if st.sidebar.button("Extract Data from Selected PDFs"):
             
             # Show download links
             st.header("Download Extracted Outputs")
+            
+            # Display S3 output location info
+            if s3_config['use_single_bucket']:
+                st.info(f"📁 Files saved to: **{s3_config['bucket_name']}/{s3_config['output_folder']}/**")
+            else:
+                st.info(f"📁 Files saved to: **{s3_config['output_bucket']}**")
             
             if output_summary.get("download_links"):
                 dl_links = output_summary["download_links"]
@@ -202,13 +257,29 @@ with st.sidebar:
     st.divider()
     st.subheader("Environment Status")
     
-    env_status = {
+    # AWS Status
+    aws_status = {
         "AWS Region": os.getenv('AWS_REGION', '❌ Not Set'),
         "AWS Access Key": "✅ Set" if os.getenv('AWS_ACCESS_KEY_ID') else "❌ Not Set",
-        "AWS Secret Key": "✅ Set" if os.getenv('AWS_SECRET_ACCESS_KEY') else "❌ Not Set",
-        "Input Bucket": os.getenv('S3_INPUT_BUCKET', '❌ Not Set'),
-        "Output Bucket": os.getenv('S3_OUTPUT_BUCKET', '❌ Not Set')
+        "AWS Secret Key": "✅ Set" if os.getenv('AWS_SECRET_ACCESS_KEY') else "❌ Not Set"
     }
     
-    for key, value in env_status.items():
-        st.write(f"**{key}:** {value}")
+    # S3 Status
+    s3_config = get_s3_config()
+    if s3_config['use_single_bucket']:
+        aws_status.update({
+            "S3 Bucket": s3_config['bucket_name'] or '❌ Not Set',
+            "Input Folder": s3_config['input_folder'] or '❌ Not Set',
+            "Output Folder": s3_config['output_folder'] or '❌ Not Set'
+        })
+    else:
+        aws_status.update({
+            "Input Bucket": s3_config['input_bucket'] or '❌ Not Set',
+            "Output Bucket": s3_config['output_bucket'] or '❌ Not Set'
+        })
+    
+    for key, value in aws_status.items():
+        if "❌" in str(value):
+            st.error(f"**{key}:** {value}")
+        else:
+            st.success(f"**{key}:** {value}")
