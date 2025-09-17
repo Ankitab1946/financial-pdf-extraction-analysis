@@ -12,6 +12,10 @@ import tempfile
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import time
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -19,58 +23,77 @@ class PDFProcessor:
     """Handle PDF processing including S3 operations, text extraction, and OCR"""
     
     def __init__(self, region_name: str = None):
+        from env_config import get_s3_config, get_aws_session
+        
         self.region_name = region_name or os.getenv('AWS_REGION', 'us-east-1')
         self.max_file_size = 100 * 1024 * 1024  # 100MB
+        self.s3_config = get_s3_config()
         
         try:
-            self.s3_client = boto3.client(
-                's3',
-                region_name=self.region_name,
-                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-                aws_session_token=os.getenv('AWS_SESSION_TOKEN')
-            )
+            session = get_aws_session()
+            self.s3_client = session.client('s3')
             logger.info(f"S3 client initialized for region: {self.region_name}")
+            logger.info(f"S3 config: {self.s3_config}")
         except Exception as e:
             logger.error(f"Failed to initialize S3 client: {str(e)}")
             raise
     
-    def list_pdfs_from_s3(self, bucket_name: str) -> List[Dict[str, Any]]:
+    def list_pdfs_from_s3(self, bucket_name: str = None) -> List[Dict[str, Any]]:
         """
-        List all PDF files in the S3 input bucket
+        List all PDF files in the S3 input location
         
         Args:
-            bucket_name: Name of the S3 bucket
+            bucket_name: Name of the S3 bucket (optional, uses config if not provided)
             
         Returns:
             List of dictionaries containing PDF file information
         """
         try:
-            response = self.s3_client.list_objects_v2(Bucket=bucket_name)
+            # Determine bucket and prefix based on configuration
+            if self.s3_config['use_single_bucket']:
+                bucket = self.s3_config['bucket_name']
+                prefix = f"{self.s3_config['input_folder']}/"
+            else:
+                bucket = bucket_name or self.s3_config['input_bucket']
+                prefix = ""
+            
+            if not bucket:
+                raise Exception("No S3 bucket configured for input")
+            
+            logger.info(f"Listing PDFs from bucket: {bucket}, prefix: {prefix}")
+            
+            response = self.s3_client.list_objects_v2(
+                Bucket=bucket,
+                Prefix=prefix
+            )
             
             if 'Contents' not in response:
-                logger.info(f"No files found in bucket: {bucket_name}")
+                logger.info(f"No files found in bucket: {bucket} with prefix: {prefix}")
                 return []
             
             pdf_files = []
             for obj in response['Contents']:
                 key = obj['Key']
-                if key.lower().endswith('.pdf'):
+                if key.lower().endswith('.pdf') and key != prefix:  # Exclude the folder itself
+                    # Extract filename from key (remove prefix)
+                    filename = key.replace(prefix, '') if prefix else os.path.basename(key)
+                    
                     pdf_info = {
                         'key': key,
-                        'filename': os.path.basename(key),
+                        'filename': filename,
                         'size': obj['Size'],
                         'last_modified': obj['LastModified'],
-                        'size_mb': round(obj['Size'] / (1024 * 1024), 2)
+                        'size_mb': round(obj['Size'] / (1024 * 1024), 2),
+                        'bucket': bucket
                     }
                     pdf_files.append(pdf_info)
             
-            logger.info(f"Found {len(pdf_files)} PDF files in bucket: {bucket_name}")
+            logger.info(f"Found {len(pdf_files)} PDF files in {bucket}/{prefix}")
             return sorted(pdf_files, key=lambda x: x['last_modified'], reverse=True)
             
         except ClientError as e:
             logger.error(f"Error listing PDFs from S3: {str(e)}")
-            raise Exception(f"Failed to access S3 bucket: {bucket_name}")
+            raise Exception(f"Failed to access S3 bucket: {bucket}")
         except Exception as e:
             logger.error(f"Unexpected error listing PDFs: {str(e)}")
             raise
