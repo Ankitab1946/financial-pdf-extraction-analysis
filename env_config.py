@@ -21,21 +21,70 @@ def load_environment():
         os.environ['BEDROCK_MODEL_ID'] = 'anthropic.claude-3-sonnet-20240229-v1:0'
         logger.info("BEDROCK_MODEL_ID not found in environment, using default model")
     
+    # Handle S3 configuration - support both single bucket with folders and separate buckets
+    s3_bucket_name = os.getenv('S3_BUCKET_NAME')
+    s3_input_folder = os.getenv('S3_INPUT_FOLDER', 'inputfolder')
+    s3_output_folder = os.getenv('S3_OUTPUT_FOLDER', 'outputfolder')
+    
+    # Legacy support for separate buckets
+    s3_input_bucket = os.getenv('S3_INPUT_BUCKET')
+    s3_output_bucket = os.getenv('S3_OUTPUT_BUCKET')
+    
+    # Determine configuration mode
+    if s3_bucket_name:
+        # Single bucket with folders mode
+        s3_input_path = s3_bucket_name
+        s3_output_path = s3_bucket_name
+        logger.info(f"Using single bucket mode: {s3_bucket_name}")
+        logger.info(f"Input folder: {s3_input_folder}")
+        logger.info(f"Output folder: {s3_output_folder}")
+    elif s3_input_bucket and s3_output_bucket:
+        # Separate buckets mode (legacy)
+        s3_input_path = s3_input_bucket
+        s3_output_path = s3_output_bucket
+        s3_input_folder = ""
+        s3_output_folder = ""
+        logger.info(f"Using separate buckets mode")
+        logger.info(f"Input bucket: {s3_input_bucket}")
+        logger.info(f"Output bucket: {s3_output_bucket}")
+    else:
+        s3_input_path = None
+        s3_output_path = None
+        s3_input_folder = ""
+        s3_output_folder = ""
+        logger.warning("No S3 configuration found")
+    
     # Log current environment variables (for debugging)
     logger.info(f"AWS_REGION: {os.getenv('AWS_REGION')}")
     logger.info(f"AWS_ACCESS_KEY_ID: {'Set' if os.getenv('AWS_ACCESS_KEY_ID') else 'Not Set'}")
     logger.info(f"AWS_SECRET_ACCESS_KEY: {'Set' if os.getenv('AWS_SECRET_ACCESS_KEY') else 'Not Set'}")
-    logger.info(f"S3_INPUT_BUCKET: {os.getenv('S3_INPUT_BUCKET', 'Not Set')}")
-    logger.info(f"S3_OUTPUT_BUCKET: {os.getenv('S3_OUTPUT_BUCKET', 'Not Set')}")
     
     return {
         'aws_region': os.getenv('AWS_REGION'),
         'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
         'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
         'aws_session_token': os.getenv('AWS_SESSION_TOKEN'),
-        's3_input_bucket': os.getenv('S3_INPUT_BUCKET'),
-        's3_output_bucket': os.getenv('S3_OUTPUT_BUCKET'),
+        's3_bucket_name': s3_bucket_name,
+        's3_input_folder': s3_input_folder,
+        's3_output_folder': s3_output_folder,
+        's3_input_path': s3_input_path,
+        's3_output_path': s3_output_path,
+        's3_input_bucket': s3_input_bucket,  # Legacy
+        's3_output_bucket': s3_output_bucket,  # Legacy
         'bedrock_model_id': os.getenv('BEDROCK_MODEL_ID')
+    }
+
+def get_s3_config():
+    """Get S3 configuration with bucket and folder information"""
+    env_vars = load_environment()
+    
+    return {
+        'bucket_name': env_vars['s3_bucket_name'],
+        'input_folder': env_vars['s3_input_folder'],
+        'output_folder': env_vars['s3_output_folder'],
+        'input_bucket': env_vars['s3_input_bucket'],  # Legacy
+        'output_bucket': env_vars['s3_output_bucket'],  # Legacy
+        'use_single_bucket': bool(env_vars['s3_bucket_name'])
     }
 
 def get_aws_session():
